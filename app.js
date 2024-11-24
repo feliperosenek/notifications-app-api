@@ -455,6 +455,6 @@ app.post('/create-task', async (req, res) => {
 
 
 // Inicia o servidor
-server.listen(process.env.PORT || 4075, () => {
-  console.log('Servidor rodando na porta 4075');
+server.listen(process.env.PORT, () => {
+  console.log('Servidor rodando na porta'+process.env.PORT);
 });
