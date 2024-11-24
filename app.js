@@ -110,7 +110,7 @@ io.on('connection', (socket) => {
 });
 
 app.post('/send-message', async (req, res) => {
-  const { message, category, route, type, channel, custom_attributes } = req.body;
+  const { message, category, route, type, channel, content, custom_attributes } = req.body;
 
   if (!message || !category || !route) {
     return res.status(400).json({ error: 'Mensagem, categoria e rota são obrigatórias.' });
@@ -133,9 +133,9 @@ app.post('/send-message', async (req, res) => {
     // Inserir a mensagem no banco de dados diretamente via SQL
     const [insertResult] = await sequelize.query(
       `INSERT INTO messages (
-        message, type, category, route, channel, custom_attributes, user_id, datetime, status
+        message, type, category, route, channel, content, custom_attributes, user_id, datetime, status
       ) VALUES (
-        :message, :type, :category, :route, :channel, :custom_attributes, :user_id, NOW(), 'active'
+        :message, :type, :category, :route, :channel, :content, :custom_attributes, :user_id, NOW(), 'active'
       ) RETURNING *`, // Retorna o registro inserido
       {
         replacements: {
@@ -143,7 +143,8 @@ app.post('/send-message', async (req, res) => {
           type: type || 'info', // Tipo padrão
           category,
           route,
-          channel: channel || 'default', // Canal padrão
+          channel: channel || 'default', 
+          content,
           custom_attributes: custom_attributes ? JSON.stringify(custom_attributes) : null, // Serializa os atributos personalizados
           user_id: userId,
         },
@@ -165,9 +166,14 @@ app.post('/send-message', async (req, res) => {
       });
     } else {
       console.log(`Nenhum cliente conectado na rota ${route}.`);
-      return res.status(404).json({
+     /* return res.status(404).json({
         error: 'Nenhum cliente conectado nessa rota.',
         data: insertedMessage, // Mensagem ainda foi registrada
+      });*/
+      return res.status(200).json({
+        success: true,
+        message: 'Mensagem enviada e registrada com sucesso.',
+        data: insertedMessage,
       });
     }
   } catch (error) {
