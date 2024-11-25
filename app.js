@@ -196,10 +196,6 @@ app.get('/get-messages/:userId', async (req, res) => {
       { replacements: { userId } }
     );
 
-    if (messages.length === 0) {
-      return res.status(200).json({ error: 'Nenhuma mensagem encontrada para este usuário.' });
-    }
-
     return res.status(200).json({ success: true, messages });
   } catch (error) {
     console.error('Erro ao recuperar mensagens:', error);
