@@ -197,7 +197,7 @@ app.get('/get-messages/:userId', async (req, res) => {
     );
 
     if (messages.length === 0) {
-      return res.status(404).json({ error: 'Nenhuma mensagem encontrada para este usuário.' });
+      return res.status(200).json({ error: 'Nenhuma mensagem encontrada para este usuário.' });
     }
 
     return res.status(200).json({ success: true, messages });
