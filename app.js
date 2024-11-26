@@ -344,11 +344,13 @@ app.post('/database/check-route-availability', async (req, res) => {
 
 // Configura uma nova rota para o usuário
 app.post('/database/set-route', async (req, res) => {
-  const { userId, route } = req.body;
+  var { userId, route } = req.body;
 
   if (!userId || !route) {
     return res.status(400).json({ error: 'ID do usuário e rota são obrigatórios.' });
   }
+
+  route = route.toLowerCase()
 
   try {
     await sequelize.query(
