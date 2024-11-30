@@ -4,7 +4,11 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const { Sequelize } = require('sequelize');
 const bcrypt = require('bcrypt');
+const { Expo } = require('expo-server-sdk');
+require('dotenv').config()
 
+
+const expo = new Expo();
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -119,7 +123,7 @@ app.post('/send-message', async (req, res) => {
   try {
     // Verificar se a rota existe no banco de dados
     const [result] = await sequelize.query(
-      `SELECT id FROM users WHERE route = :route`,
+      `SELECT id, token_notification FROM users WHERE route = :route`,
       { replacements: { route } }
     );
 
@@ -152,30 +156,43 @@ app.post('/send-message', async (req, res) => {
     );
 
     const insertedMessage = insertResult[0]; // Mensagem registrada no banco
+    const pushToken = result[0].token_notification
 
     // Verificar se há clientes conectados à rota especificada
     if (clientsByRoute[route]) {
       clientsByRoute[route].forEach((socketId) => {
         io.to(socketId).emit('new-message', insertedMessage); // Envia a mensagem para os clientes conectados
       });
+
       console.log(`Mensagem enviada para a rota ${route}:`, insertedMessage);
-      return res.status(200).json({
-        success: true,
-        message: 'Mensagem enviada e registrada com sucesso.',
-        data: insertedMessage,
-      });
+
+    } else if (pushToken && Expo.isExpoPushToken(pushToken)) {
+      // Enviar notificação push se não houver WebSocket conectado
+      const notifications = [{
+        to: pushToken,
+        sound: 'default',
+        title: `${type} - ${message}`,
+        body: content,
+        data: { custom_attributes },
+      }];
+
+      // Dividir notificações em chunks para envio
+      try {
+        const ticket = await expo.sendPushNotificationsAsync(notifications);
+        console.log('Notificação enviada:', ticket);
+      } catch (error) {
+        console.error('Erro ao enviar notificação push:', error);
+      }
     } else {
-      console.log(`Nenhum cliente conectado na rota ${route}.`);
-     /* return res.status(404).json({
-        error: 'Nenhum cliente conectado nessa rota.',
-        data: insertedMessage, // Mensagem ainda foi registrada
-      });*/
-      return res.status(200).json({
-        success: true,
-        message: 'Mensagem enviada e registrada com sucesso.',
-        data: insertedMessage,
-      });
+      console.log(`Nenhum cliente conectado na rota ${route} e sem token push válido.`);
     }
+
+
+    return res.status(200).json({
+      success: true,
+      message: 'Mensagem enviada e registrada com sucesso.',
+      data: insertedMessage,
+    });
   } catch (error) {
     console.error('Erro ao processar mensagem:', error);
     return res.status(500).json({ error: 'Erro interno do servidor.' });
@@ -453,6 +470,6 @@ app.post('/create-task', async (req, res) => {
 
 
 // Inicia o servidor
-server.listen(process.env.PORT, () => {
+server.listen(process.env.PORT, '0.0.0.0', () => {
   console.log('Servidor rodando na porta'+process.env.PORT);
 });
