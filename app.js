@@ -157,7 +157,7 @@ app.post('/send-message', async (req, res) => {
 
     const insertedMessage = insertResult[0]; // Mensagem registrada no banco
     const pushToken = result[0].token_notification
-
+    console.log("Push Token ->  "+ pushToken)
     // Verificar se há clientes conectados à rota especificada
     if (clientsByRoute[route]) {
       clientsByRoute[route].forEach((socketId) => {
