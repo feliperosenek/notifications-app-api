@@ -6,7 +6,7 @@ const { Sequelize } = require('sequelize');
 const bcrypt = require('bcrypt');
 const { Expo } = require('expo-server-sdk');
 require('dotenv').config()
-
+const { messaging } = require('./firebaseAdmin')
 
 const expo = new Expo();
 const app = express();
@@ -40,7 +40,7 @@ sequelize
     console.error('Erro ao conectar ao banco de dados:', err);
   });
 
-  const clientsByRoute = {};
+const clientsByRoute = {};
 
 // WebSocket - Quando um cliente se conecta
 io.on('connection', (socket) => {
@@ -123,7 +123,7 @@ app.post('/send-message', async (req, res) => {
   try {
     // Verificar se a rota existe no banco de dados
     const [result] = await sequelize.query(
-      `SELECT id, token_notification FROM users WHERE route = :route`,
+      `SELECT id, token_notification_android, token_notification_web FROM users WHERE route = :route`,
       { replacements: { route } }
     );
 
@@ -133,7 +133,7 @@ app.post('/send-message', async (req, res) => {
     }
 
     const userId = result[0].id; // Obtém o ID do usuário associado
-
+    console.log(result[0])
     // Inserir a mensagem no banco de dados diretamente via SQL
     const [insertResult] = await sequelize.query(
       `INSERT INTO messages (
@@ -147,7 +147,7 @@ app.post('/send-message', async (req, res) => {
           type: type || 'info', // Tipo padrão
           category,
           route,
-          channel: channel || 'default', 
+          channel: channel || 'default',
           content,
           custom_attributes: custom_attributes ? JSON.stringify(custom_attributes) : null, // Serializa os atributos personalizados
           user_id: userId,
@@ -156,9 +156,13 @@ app.post('/send-message', async (req, res) => {
     );
 
     const insertedMessage = insertResult[0]; // Mensagem registrada no banco
-    const pushToken = result[0].token_notification
-    console.log("Push Token ->  "+ pushToken)
-    // Verificar se há clientes conectados à rota especificada
+
+    var pushToken = null
+
+    if (result[0].token_notification_android) {
+      const pushToken = result[0].token_notification_android
+      console.log("Push Token ->  " + pushToken)
+    }
     if (clientsByRoute[route]) {
       clientsByRoute[route].forEach((socketId) => {
         io.to(socketId).emit('new-message', insertedMessage); // Envia a mensagem para os clientes conectados
@@ -183,10 +187,39 @@ app.post('/send-message', async (req, res) => {
       } catch (error) {
         console.error('Erro ao enviar notificação push:', error);
       }
-    } else {
-      console.log(`Nenhum cliente conectado na rota ${route} e sem token push válido.`);
+    }
+    else {
+      console.log(`Nenhum cliente conectado na rota ${route} e sem token push válido par o Android`);
     }
 
+    if (result[0].token_notification_web) {
+
+      try {
+        console.log("Web Token OK")
+
+        const token = result[0].token_notification_web;
+
+        // Define o payload da notificação
+        const payload = {
+          notification: {
+            title: 'Nova Mensagem2222!',
+            body: 'Você recebeu uma nova mensage222m!'
+          },
+        };
+
+        const response = await messaging.send({
+          token,
+          notification: payload.notification,
+        });
+
+        console.log('Notificação enviada com sucesso:', response);
+
+      } catch (err) {
+        console.log(err)
+      }
+    } else {
+      console.log(`Nenhum cliente conectado na rota ${route} e sem token push válido na Web`);
+    }
 
     return res.status(200).json({
       success: true,
@@ -471,5 +504,5 @@ app.post('/create-task', async (req, res) => {
 
 // Inicia o servidor
 server.listen(process.env.PORT, '0.0.0.0', () => {
-  console.log('Servidor rodando na porta'+process.env.PORT);
+  console.log('Servidor rodando na porta' + process.env.PORT);
 });
