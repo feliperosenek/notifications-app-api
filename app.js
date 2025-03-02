@@ -114,6 +114,7 @@ io.on('connection', (socket) => {
 });
 
 app.post('/send-message', async (req, res) => {
+  
   const { message, category, route, type, channel, content, custom_attributes } = req.body;
 
   if (!message || !category || !route) {
@@ -160,42 +161,49 @@ app.post('/send-message', async (req, res) => {
     var pushToken = null
 
     if (result[0].token_notification_android) {
-      const pushToken = result[0].token_notification_android
+      pushToken = result[0].token_notification_android
       console.log("Push Token ->  " + pushToken)
     }
-    if (clientsByRoute[route]) {
+    if (clientsByRoute[route]) { // Se a rota existe manda para Websocket
       clientsByRoute[route].forEach((socketId) => {
         io.to(socketId).emit('new-message', insertedMessage); // Envia a mensagem para os clientes conectados
       });
 
       console.log(`Mensagem enviada para a rota ${route}:`, insertedMessage);
 
-    } else if (pushToken && Expo.isExpoPushToken(pushToken)) {
-      // Enviar notificação push se não houver WebSocket conectado
-      const notifications = [{
-        to: pushToken,
-        sound: 'default',
-        title: `${type} - ${message}`,
-        body: content,
-        data: { custom_attributes },
-      }];
+    } else if (pushToken) {
+      const sendExpoPushNotification = async (token, title, body, data = {}) => {
+        const messageData = {
+            to: token, // Expo Push Token
+            sound: 'default',
+            title: type +" - "+message,
+            vibrate: true,
+            icon:type,
+            body: content,
+            channelId: type, // Dados adicionais (opcional)
+        };
+    
+        const response = await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(messageData),
+        });
+    
+        const result = await response.json();
+        console.log('Resposta do Expo:', result);
+        return result;
+    };
 
-      // Dividir notificações em chunks para envio
-      try {
-        const ticket = await expo.sendPushNotificationsAsync(notifications);
-        console.log('Notificação enviada:', ticket);
-      } catch (error) {
-        console.error('Erro ao enviar notificação push:', error);
-      }
-    }
-    else {
-      console.log(`Nenhum cliente conectado na rota ${route} e sem token push válido par o Android`);
+    sendExpoPushNotification(pushToken, 'Título da Notificação', 'Corpo da Notificação');
     }
 
     if (result[0].token_notification_web) {
 
       try {
-        console.log("Web Token OK")
+   /*     console.log("Web Token OK")
 
         const token = result[0].token_notification_web;
 
@@ -212,7 +220,7 @@ app.post('/send-message', async (req, res) => {
           notification: payload.notification,
         });
 
-        console.log('Notificação enviada com sucesso:', response);
+        console.log('Notificação enviada com sucesso:', response);*/
 
       } catch (err) {
         console.log(err)
