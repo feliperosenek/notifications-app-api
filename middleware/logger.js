@@ -8,11 +8,11 @@ const queryTypeColors = {
     UPDATE: 'yellow',
     DELETE: 'red',
     message: 'green',
-    socket: 'yellow',
     query: 'magenta',
     user: 'blue',
     route: 'green',
-    warn: 'red'
+    warn: 'red',
+    delivery: 'cyan'
 };
 
 // Função para formatar o body da requisição
@@ -74,10 +74,7 @@ const logger = winston.createLogger({
     ]
 });
 
-// Adiciona método socket ao logger
-logger.socket = function (message, metadata = {}) {
-    this.info(message, { ...metadata, type: 'socket' });
-};
+
 
 // Adiciona método message ao logger
 logger.message = function (message, metadata = {}) {
@@ -99,10 +96,20 @@ logger.route = function (message, metadata = {}) {
     this.info(message, { ...metadata, type: 'route' });
 };
 
+// Adiciona método task ao logger
+logger.task = function (message, metadata = {}) {
+    this.info(message, { ...metadata, type: 'task' });
+};
+
 // Adiciona método warn ao logger
 const originalWarn = logger.warn;
 logger.warn = function (message, metadata = {}) {
     originalWarn.call(this, message, { ...metadata, type: 'warn' });
+};
+
+// Adiciona método delivery ao logger
+logger.delivery = function (message, metadata = {}) {
+    this.info(message, { ...metadata, type: 'delivery' });
 };
 
 // Middleware de logging

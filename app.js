@@ -1,62 +1,53 @@
-const express = require('express');
-const http = require('http');
-const cors = require('cors');
-const { Sequelize } = require('sequelize');
 require('dotenv').config();
-const { messaging } = require('./firebaseAdmin');
+const express = require('express');
+const cors = require('cors');
+const { logger } = require('./middleware/logger');
 
-// Importando as rotas
-const messagesRouter = require('./routes/messages');
-const authRouter = require('./routes/auth');
-const routesRouter = require('./routes/routes');
-const tasksRouter = require('./routes/tasks');
-const databaseRouter = require('./routes/database');
-const sendMessageRouter = require('./routes/sendMessage');
-const setupWebSocket = require('./routes/websocket');
-
+// Configuração do servidor
 const app = express();
-const server = http.createServer(app);
+const server = require('http').createServer(app);
 
 // Middlewares
 app.use(cors());
 app.use(express.json());
 
-// Configuração do Sequelize
-const sequelize = new Sequelize('railway', 'postgres', 'VaGnIdrpgcKBJmAyBEyAyOrlxwJClYOz', {
-  host: 'autorack.proxy.rlwy.net',
-  dialect: 'postgres',
-  port: 45376,
-  logging: false,
-});
+// Configuração do banco de dados
+const sequelize = require('./config/database');
 
-// Disponibiliza o sequelize para as rotas e middlewares
+// Disponibilizar sequelize para as rotas e middlewares
 app.set('sequelize', sequelize);
 
-// Testar conexão com o banco de dados
-sequelize
-  .authenticate()
-  .then(() => {
-    console.log('Conexão com o banco de dados estabelecida com sucesso.');
-  })
-  .catch((err) => {
-    console.error('Erro ao conectar ao banco de dados:', err);
-  });
+// Rotas
+app.use('/send-message', require('./routes/sendMessage'));
+app.use('/messages', require('./routes/messages'));
+app.use('/tokens', require('./routes/tokens'));
+app.use('/webhook', require('./routes/webhooks'));
+app.use('/sse', require('./routes/sse').router);
 
-// Configurar WebSocket
-const { io, clientsByRoute } = setupWebSocket(server, sequelize);
+// Rotas existentes...
+app.use('/auth', require('./routes/auth'));
+app.use('/tasks', require('./routes/tasks'));
+app.use('/database', require('./routes/database')(sequelize));
 
-// Disponibiliza o io para as rotas
-app.set('io', io);
+// Tratamento de erros
+app.use((error, req, res, next) => {
+    logger.error('Erro não tratado', {
+        error: error.message,
+        stack: error.stack,
+        url: req.url,
+        method: req.method
+    });
 
-// Registrando as rotas
-app.use('/messages', messagesRouter(sequelize));
-app.use('/auth', authRouter(sequelize));
-app.use('/routes', routesRouter(sequelize));
-app.use('/tasks', tasksRouter(sequelize));
-app.use('/database', databaseRouter(sequelize));
-app.use('/send-message', sendMessageRouter(sequelize, clientsByRoute));
+    res.status(500).json({
+        error: 'Erro interno do servidor'
+    });
+});
 
-// Inicia o servidor
-server.listen(process.env.PORT, '0.0.0.0', () => {
-  console.log('Servidor rodando na porta' + process.env.PORT);
-}); 
+// Inicialização do servidor
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+    logger.info(`Servidor iniciado na porta ${PORT}`);
+    logger.info('Sistema de notificações com FCM nativo ativo');
+});
+
+module.exports = { app, server, sequelize }; 
