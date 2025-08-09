@@ -7,10 +7,237 @@ const messageRateLimit = require('../verifications/messageRateLimit');
 const { sendMessageNotification } = require('./sse');
 
 /**
+ * Função auxiliar para validar URL
+ */
+function isValidUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Função auxiliar para validar URL de imagem
+ */
+function isValidImageUrl(url) {
+  if (!isValidUrl(url)) return false;
+  
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+  const lowerUrl = url.toLowerCase();
+  return imageExtensions.some(ext => lowerUrl.includes(ext));
+}
+
+/**
+ * Função auxiliar para validar URL de áudio
+ */
+function isValidAudioUrl(url) {
+  if (!isValidUrl(url)) return false;
+  
+  const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac'];
+  const lowerUrl = url.toLowerCase();
+  return audioExtensions.some(ext => lowerUrl.includes(ext));
+}
+
+/**
+ * Função auxiliar para processar envio de mensagem
+ */
+async function processMessageSend(req, res, messageType, content, route) {
+  try {
+    const { message, type, category, channel, custom_attributes } = req.body;
+    
+    // Validações básicas - verificar campos obrigatórios
+    const requiredFields = ['message', 'type', 'category', 'route', 'channel', 'content'];
+    const missingFields = requiredFields.filter(field => !req.body[field]);
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        error: `Campos obrigatórios ausentes: ${missingFields.join(', ')}`
+      });
+    }
+
+    // Verificar se a rota existe
+    const [routeResult] = await sequelize.query(
+      `SELECT r.id, r.name, r.token, u.id as user_id, u.name as user_name, u.fcm_token
+       FROM routes r 
+       JOIN users u ON r.users_id = u.id 
+       WHERE r.name = :route`,
+      { replacements: { route: route.trim() } }
+    );
+
+    if (routeResult.length === 0) {
+      return res.status(404).json({
+        error: 'Rota não encontrada'
+      });
+    }
+
+    const routeData = routeResult[0];
+console.log(routeData)
+    // Inserir mensagem no banco
+    const [insertResult] = await sequelize.query(
+      `INSERT INTO messages (
+          message, type, category, route, channel, content, custom_attributes, 
+          route_id, user_id, datetime, status
+      ) VALUES (
+          :message, :type, :category, :route, :channel, :content, :custom_attributes,
+          :route_id, :user_id, NOW(), 'active'
+      ) RETURNING *`,
+      {
+        replacements: {
+          message,
+          type,
+          category,
+          route,
+          channel,
+          content: content.trim(),
+          custom_attributes: custom_attributes ? JSON.stringify(custom_attributes) : null,
+          route_id: routeData.id,
+          user_id: routeData.user_id
+        }
+      }
+    );
+
+    const insertedMessage = insertResult[0];
+
+    // Enviar notificação via FCM (se token disponível)
+    let fcmResult = null;
+    if (routeData.fcm_token) {
+      fcmResult = await FCMService.sendPushNotification(routeData.fcm_token, {
+        id: insertedMessage.id,
+        message,
+        type,
+        category,
+        route,
+        channel,
+        content,
+        custom_attributes,
+        user_id: routeData.user_id
+      });
+    }
+
+    // Notificar app frontend via SSE
+    const sseResult = sendMessageNotification(routeData.name, insertedMessage);
+
+    // Log do resultado
+    const fcmSuccess = fcmResult?.success || false;
+    const sseSuccess = sseResult.success;
+    
+    logger.delivery('Mensagem processada', {
+      messageId: insertedMessage.id,
+      type,
+      category,
+      route: routeData.name,
+      channel,
+      fcmSuccess,
+      sseSuccess,
+      overallDelivery: fcmSuccess || sseSuccess ? 'SUCCESS' : 'FAILED'
+    });
+    
+    res.json({
+      success: true,
+      message: 'Mensagem enviada com sucesso',
+      messageId: insertedMessage.id,
+      type,
+      category,
+      route,
+      channel,
+      fcmSuccess,
+      sseSuccess,
+      overallDelivery: fcmSuccess || sseSuccess ? 'SUCCESS' : 'FAILED'
+    });
+
+  } catch (error) {
+    logger.error('Erro ao processar mensagem', {
+      error: error.message,
+      body: req.body
+    });
+
+    res.status(500).json({
+      error: 'Erro interno do servidor'
+    });
+  }
+}
+
+/**
  * POST /send-message
- * Envia notificação com nova hierarquia de prioridade
+ * Envia mensagem (ATUALIZADO conforme documentação)
  */
 router.post('/', messageRateLimit, async (req, res) => {
+  const { message, type, category, route, channel, content, custom_attributes } = req.body;
+
+  // Validações obrigatórias - verificar campos obrigatórios
+  const requiredFields = ['message', 'type', 'category', 'route', 'channel', 'content'];
+  const missingFields = requiredFields.filter(field => !req.body[field]);
+  
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      error: `Campos obrigatórios ausentes: ${missingFields.join(', ')}`
+    });
+  }
+
+  await processMessageSend(req, res, type, content, route);
+});
+
+/**
+ * POST /send-image
+ * Envia mensagem com URL de imagem (NOVO endpoint conforme documentação)
+ */
+router.post('/send-image', messageRateLimit, async (req, res) => {
+  const { message, type, category, route, channel, content, custom_attributes } = req.body;
+
+  // Validações obrigatórias - verificar campos obrigatórios
+  const requiredFields = ['message', 'type', 'category', 'route', 'channel', 'content'];
+  const missingFields = requiredFields.filter(field => !req.body[field]);
+  
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      error: `Campos obrigatórios ausentes: ${missingFields.join(', ')}`
+    });
+  }
+
+  // Validação específica para imagem
+  if (!isValidImageUrl(content)) {
+    return res.status(400).json({
+      error: 'URL da imagem deve ser HTTPS válida com extensão de imagem (.jpg, .png, .gif, etc.)'
+    });
+  }
+
+  await processMessageSend(req, res, type, content, route);
+});
+
+/**
+ * POST /send-audio
+ * Envia mensagem com URL de áudio (NOVO endpoint conforme documentação)
+ */
+router.post('/send-audio', messageRateLimit, async (req, res) => {
+  const { message, type, category, route, channel, content, custom_attributes } = req.body;
+
+  // Validações obrigatórias - verificar campos obrigatórios
+  const requiredFields = ['message', 'type', 'category', 'route', 'channel', 'content'];
+  const missingFields = requiredFields.filter(field => !req.body[field]);
+  
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      error: `Campos obrigatórios ausentes: ${missingFields.join(', ')}`
+    });
+  }
+
+  // Validação específica para áudio
+  if (!isValidAudioUrl(content)) {
+    return res.status(400).json({
+      error: 'URL do áudio deve ser HTTPS válida com extensão de áudio (.mp3, .wav, .ogg, etc.)'
+    });
+  }
+
+  await processMessageSend(req, res, type, content, route);
+});
+
+/**
+ * POST /send-message (LEGACY - mantido para compatibilidade)
+ * Envia notificação com nova hierarquia de prioridade
+ */
+router.post('/legacy', messageRateLimit, async (req, res) => {
     try {
         const { message, category, route, type = 'info', channel = 'default', content, custom_attributes } = req.body;
 

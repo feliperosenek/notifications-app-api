@@ -19,6 +19,8 @@ app.set('sequelize', sequelize);
 
 // Rotas
 app.use('/send-message', require('./routes/sendMessage'));
+app.use('/send-image', require('./routes/sendMessage')); // Novo endpoint para imagens
+app.use('/send-audio', require('./routes/sendMessage')); // Novo endpoint para áudio
 app.use('/messages', require('./routes/messages'));
 app.use('/tokens', require('./routes/tokens'));
 app.use('/webhook', require('./routes/webhooks'));
@@ -48,6 +50,7 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     logger.info(`Servidor iniciado na porta ${PORT}`);
     logger.info('Sistema de notificações com FCM nativo ativo');
+    logger.info('Novos endpoints implementados: /send-image, /send-audio');
 });
 
 module.exports = { app, server, sequelize }; 

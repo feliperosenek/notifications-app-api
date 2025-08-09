@@ -76,13 +76,16 @@ router.post('/update-token', async (req, res) => {
             }
         }
 
-        // Buscar usuário
+        // Buscar usuário através da tabela routes
         logger.debug('Buscando usuário no banco de dados', {
             route
         });
         
         const [userResult] = await sequelize.query(
-            `SELECT id FROM users WHERE route = :route`,
+            `SELECT u.id, u.route, u.fcm_token, u.token_notification_android, u.token_notification_web, u.token_updated_at
+             FROM users u 
+             JOIN routes r ON u.id = r.users_id 
+             WHERE r.name = :route`,
             { replacements: { route } }
         );
 
@@ -208,8 +211,10 @@ router.get('/tokens/:route', async (req, res) => {
         const { route } = req.params;
 
         const [result] = await sequelize.query(
-            `SELECT fcm_token, token_notification_android, token_notification_web, token_updated_at 
-             FROM users WHERE route = :route`,
+            `SELECT u.fcm_token, u.token_notification_android, u.token_notification_web, u.token_updated_at 
+             FROM users u 
+             JOIN routes r ON u.id = r.users_id 
+             WHERE r.name = :route`,
             { replacements: { route } }
         );
 
@@ -326,10 +331,12 @@ router.get('/check-route/:route', async (req, res) => {
     try {
         const { route } = req.params;
         
-        // Buscar usuário no banco
+        // Buscar usuário no banco através da tabela routes
         const [userResult] = await sequelize.query(
-            `SELECT id, route, fcm_token, token_notification_android, token_notification_web, token_updated_at 
-             FROM users WHERE route = :route`,
+            `SELECT u.id, u.route, u.fcm_token, u.token_notification_android, u.token_notification_web, u.token_updated_at 
+             FROM users u 
+             JOIN routes r ON u.id = r.users_id 
+             WHERE r.name = :route`,
             { replacements: { route } }
         );
         

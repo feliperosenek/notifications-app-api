@@ -8,31 +8,34 @@ const messageRateLimit = async (req, res, next) => {
       return res.status(400).json({ error: 'Rota é obrigatória' });
     }
 
-    // Busca o usuário pelo route
-    const [users] = await req.app.get('sequelize').query(
-      `SELECT id, premium, message_count FROM users WHERE route = :route`,
+    // Busca a rota e o usuário através do nome da rota
+    const [routes] = await req.app.get('sequelize').query(
+      `SELECT r.id as route_id, r.name, u.id as user_id, u.premium, u.message_count 
+       FROM routes r 
+       JOIN users u ON r.users_id = u.id 
+       WHERE r.name = :route`,
       { replacements: { route } }
     );
 
-    if (users.length === 0) {
+    if (routes.length === 0) {
       return res.status(404).json({ error: 'Rota não encontrada' });
     }
 
-    const user = users[0];
+    const routeData = routes[0];
     
     // Se o usuário for premium, permite passar
-    if (user.premium) {
+    if (routeData.premium) {
       return next();
     }
 
     // Verifica o limite total de mensagens
-    if (user.message_count >= 25) {
+    if (routeData.message_count >= 25) {
       return res.status(403).json({
         error: 'Limite de 25 mensagens atingido. Para ter acesso ilimitado, contrate o premium.'
       });
     }
 
-    const userId = user.id;
+    const userId = routeData.user_id;
     const now = Date.now();
     const oneMinuteAgo = now - 60000; // 60000ms = 1 minuto
 

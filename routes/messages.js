@@ -20,10 +20,10 @@ router.get('/get-messages/:userId', async (req, res) => {
             { replacements: { userId } }
         );
 
-        logger.message('Mensagens recuperadas', {
+       /* logger.message('Mensagens recuperadas', {
             userId,
             count: messages.length
-        });
+        });*/
 
         return res.status(200).json({ success: true, messages });
     } catch (error) {
