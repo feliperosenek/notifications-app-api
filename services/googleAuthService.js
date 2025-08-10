@@ -13,8 +13,9 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  */
 async function verifyGoogleToken(idToken) {
     try {
-        logger.info('Verificando token Google', { 
-            tokenPreview: idToken.substring(0, 20) + '...' 
+        logger.google('🔍 Iniciando verificação do token Google', { 
+            tokenPreview: idToken.substring(0, 20) + '...',
+            tokenLength: idToken.length
         });
 
         const ticket = await client.verifyIdToken({
@@ -34,9 +35,11 @@ async function verifyGoogleToken(idToken) {
             locale: payload.locale || 'pt-BR'
         };
 
-        logger.info('Token Google verificado com sucesso', { 
+        logger.google('✅ Token Google verificado com sucesso', { 
             email: userData.email,
-            googleId: userData.googleId 
+            googleId: userData.googleId,
+            isVerified: userData.isVerified,
+            locale: userData.locale
         });
 
         return userData;
@@ -56,7 +59,7 @@ async function verifyGoogleToken(idToken) {
  */
 async function findUserByGoogleId(googleId) {
     try {
-        const [users] = await sequelize.query(
+        const users = await sequelize.query(
             `SELECT * FROM users WHERE google_id = :googleId`,
             { 
                 replacements: { googleId },
@@ -81,7 +84,7 @@ async function findUserByGoogleId(googleId) {
  */
 async function findUserByEmail(email) {
     try {
-        const [users] = await sequelize.query(
+        const users = await sequelize.query(
             `SELECT * FROM users WHERE email = :email`,
             { 
                 replacements: { email },
@@ -111,7 +114,7 @@ async function createGoogleUser(userData) {
             googleId: userData.googleId 
         });
 
-        const [newUser] = await sequelize.query(
+        const newUser = await sequelize.query(
             `INSERT INTO users (
                 first_name, 
                 last_name, 
@@ -148,13 +151,16 @@ async function createGoogleUser(userData) {
             }
         );
         
+        // Para INSERT com RETURNING, o resultado está em newUser[0]
+        const createdUser = newUser[0][0];
+        
         logger.user('Usuário Google criado com sucesso', {
-            userId: newUser[0].id,
+            userId: createdUser.id,
             email: userData.email,
             authProvider: 'google'
         });
 
-        return newUser[0];
+        return createdUser;
     } catch (error) {
         logger.error('Erro ao criar usuário Google', { 
             error: error.message,
@@ -279,15 +285,33 @@ function verifyJWT(token) {
  */
 async function processGoogleLogin(idToken) {
     try {
+        logger.google('🚀 Iniciando processamento do login Google', {
+            tokenPreview: idToken.substring(0, 20) + '...'
+        });
+
         // 1. Verificar token do Google
         const googleUserData = await verifyGoogleToken(idToken);
         
         // 2. Verificar se usuário já existe por Google ID
         let user = await findUserByGoogleId(googleUserData.googleId);
+        
+        logger.google('🔍 Verificação de usuário por Google ID', {
+            googleId: googleUserData.googleId,
+            email: googleUserData.email,
+            userFound: !!user
+        });
 
         if (!user) {
             // 3. Verificar se já existe usuário com mesmo email
             const existingUser = await findUserByEmail(googleUserData.email);
+            
+            logger.google('🔍 Verificação de usuário por email', {
+                email: googleUserData.email,
+                existingUserFound: !!existingUser,
+                existingUserId: existingUser?.id,
+                existingUserGoogleId: existingUser?.google_id,
+                existingUserAuthProvider: existingUser?.auth_provider
+            });
             
             if (existingUser) {
                 // 4. Vincular conta Google à conta existente
@@ -332,6 +356,13 @@ async function processGoogleLogin(idToken) {
         const sessionToken = generateJWT(user);
 
         // 8. Retornar dados completos
+        logger.google('🎉 Login Google processado com sucesso', {
+            userId: user.id,
+            email: user.email,
+            authProvider: user.auth_provider,
+            isNewUser: !user.created_at || user.created_at === user.updated_at
+        });
+
         return {
             success: true,
             user: {
@@ -349,8 +380,9 @@ async function processGoogleLogin(idToken) {
         };
 
     } catch (error) {
-        logger.error('Erro no processamento do login Google', { 
-            error: error.message 
+        logger.error('❌ Erro no processamento do login Google', { 
+            error: error.message,
+            stack: error.stack
         });
         
         return {

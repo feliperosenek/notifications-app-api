@@ -12,7 +12,9 @@ const queryTypeColors = {
     user: 'blue',
     route: 'green',
     warn: 'red',
-    delivery: 'cyan'
+    delivery: 'cyan',
+    google: 'blue',
+    info: 'white'
 };
 
 // Função para formatar o body da requisição
@@ -112,6 +114,11 @@ logger.delivery = function (message, metadata = {}) {
     this.info(message, { ...metadata, type: 'delivery' });
 };
 
+// Adiciona método google ao logger
+logger.google = function (message, metadata = {}) {
+    this.info(message, { ...metadata, type: 'google' });
+};
+
 // Middleware de logging
 const loggerMiddleware = (req, res, next) => {
     const start = Date.now();
@@ -119,10 +126,27 @@ const loggerMiddleware = (req, res, next) => {
     // Formata o body antes de fazer o log
     const formattedBody = formatRequestBody(req.body);
 
+    // Log da requisição recebida
+    logger.info(`${req.method} ${req.path}`, {
+        method: req.method,
+        path: req.path,
+        query: req.query,
+        body: formattedBody,
+        ip: req.ip || req.connection.remoteAddress,
+        userAgent: req.get('User-Agent')
+    });
+
     // Intercepta o envio da resposta
     res.on('finish', () => {
         const duration = Date.now() - start;
-
+        
+        logger.info(`Response ${req.method} ${req.path}`, {
+            method: req.method,
+            path: req.path,
+            statusCode: res.statusCode,
+            duration: `${duration}ms`,
+            contentLength: res.get('content-length') || 0
+        });
     });
 
     next();
