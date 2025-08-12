@@ -73,7 +73,7 @@ async function processMessageSend(req, res, messageType, content, route) {
     }
 
     const routeData = routeResult[0];
-console.log(routeData)
+
     // Inserir mensagem no banco
     const [insertResult] = await sequelize.query(
       `INSERT INTO messages (

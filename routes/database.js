@@ -698,6 +698,146 @@ const injectDependencies = (sequelize) => {
     }
   });
 
+  // Rota para verificar se o usuário tem senha definida
+  router.post('/check-user-password', async (req, res) => {
+    const { email } = req.body;
+    logger.user('Verificação de senha do usuário', { email });
+
+    if (!email) {
+      logger.warn('Tentativa de verificar senha sem email');
+      return res.status(400).json({ error: 'Email é obrigatório.' });
+    }
+
+    try {
+      logger.query('Verificando se usuário tem senha definida', { email });
+      const [user] = await sequelize.query(
+        `SELECT password FROM users WHERE email = :email`,
+        { replacements: { email } }
+      );
+
+      if (user.length === 0) {
+        logger.warn('Usuário não encontrado', { email });
+        return res.status(404).json({ error: 'Usuário não encontrado.' });
+      }
+
+      const userRecord = user[0];
+      // Garante que hasPassword seja sempre true ou false
+      const hasPassword = Boolean(userRecord.password && typeof userRecord.password === 'string' && userRecord.password.trim() !== '');
+
+      logger.user('Verificação de senha concluída', {  
+        hasPassword
+      });
+
+      res.status(200).json({
+        hasPassword
+      });
+
+    } catch (error) {
+      logger.error('Erro ao verificar senha do usuário', { error: error.message, email });
+      res.status(500).json({ error: 'Erro ao verificar senha do usuário.' });
+    }
+  });
+
+  // Rota para atualizar/redefinir senha do usuário
+  router.post('/update-password', async (req, res) => {
+    const { email, password, token } = req.body;
+    logger.user('Tentativa de atualizar senha', { email });
+
+    if (!email || !password) {
+      logger.warn('Tentativa de atualizar senha sem email ou senha');
+      return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
+    }
+
+    // Validação básica de senha
+    if (password.length < 6) {
+      logger.warn('Tentativa de definir senha muito curta', { email, passwordLength: password.length });
+      return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres.' });
+    }
+
+    try {
+      // Verificar se o usuário existe
+      logger.query('Verificando existência do usuário', { email });
+      const [user] = await sequelize.query(
+        `SELECT id FROM users WHERE email = :email`,
+        { replacements: { email } }
+      );
+
+      if (user.length === 0) {
+        logger.warn('Tentativa de atualizar senha para usuário inexistente', { email });
+        return res.status(404).json({ error: 'Usuário não encontrado.' });
+      }
+
+      // Hash da nova senha
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Atualizar senha no banco
+      logger.query('Atualizando senha do usuário', { email });
+      await sequelize.query(
+        `UPDATE users SET password = :password WHERE email = :email`,
+        { replacements: { password: hashedPassword, email } }
+      );
+
+      logger.user('Senha atualizada com sucesso', { 
+        email, 
+        userId: user[0].id,
+        ip: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Senha atualizada com sucesso.',
+        email: email
+      });
+
+    } catch (error) {
+      logger.error('Erro ao atualizar senha', { error: error.message, email });
+      res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  });
+
+  // Rota para retornar dados do usuário por email
+  router.post('/get-user', async (req, res) => {
+    const { email } = req.body;
+    logger.user('Solicitação de dados do usuário', { email });
+
+    if (!email) {
+      logger.warn('Tentativa de buscar usuário sem email');
+      return res.status(400).json({ error: 'Email é obrigatório.' });
+    }
+
+    try {
+      // Buscar dados do usuário
+      logger.query('Buscando dados do usuário', { email });
+      const [user] = await sequelize.query(
+        `SELECT * FROM users WHERE email = :email`,
+        { replacements: { email } }
+      );
+
+      if (user.length === 0) {
+        logger.warn('Usuário não encontrado', { email });
+        return res.status(404).json({ error: 'Usuário não encontrado.' });
+      }
+
+      const userData = user[0];
+
+      // Log de sucesso
+      logger.user('Dados do usuário retornados com sucesso', { 
+        email, 
+        userId: userData.id,
+        ip: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+
+      // Retornar dados do usuário (sem senha por segurança)
+      res.status(200).json(userData);
+
+    } catch (error) {
+      logger.error('Erro ao buscar dados do usuário', { error: error.message, email });
+      res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  });
+
   // Rota para consultas SQL genéricas
   router.post('/', async (req, res) => {
     const { query } = req.body;

@@ -236,13 +236,13 @@ router.get('/google-callback', async (req, res) => {
         const oauth2Client = new OAuth2Client(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
-            `https://2ceb299fa5fe.ngrok-free.app`
+            `https://stallion-hot-weasel.ngrok-free.app`
         );
 
         logger.google('🔄 Trocando authorization code por tokens', {
             clientId: process.env.GOOGLE_CLIENT_ID,
             hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
-            redirectUri: `https://2ceb299fa5fe.ngrok-free.app/auth/google-callback`
+            redirectUri: `https://stallion-hot-weasel.ngrok-free.app/auth/google-callback`
         });
 
         let loginResult;
@@ -449,7 +449,7 @@ router.post('/google-callback', async (req, res) => {
         const oauth2Client = new OAuth2Client(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
-            redirect_uri || `https://2ceb299fa5fe.ngrok-free.app/auth/google-callback`
+            redirect_uri || `https://stallion-hot-weasel.ngrok-free.app/auth/google-callback`
         );
 
         let loginResult;

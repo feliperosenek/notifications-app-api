@@ -27,15 +27,15 @@ async function getUserById(userId) {
 
 /**
  * POST /update-token
- * Atualiza token FCM do usuário
+ * Atualiza tokens de notificação do usuário
  */
 router.post('/update-token', async (req, res) => {
     try {
-        const { route, fcmToken, expoToken, webToken } = req.body;
+        const { email, fcmToken, expoToken, webToken } = req.body;
 
         // Log inicial da requisição
         logger.info('Iniciando atualização de tokens', {
-            route,
+            email,
             hasFCMToken: !!fcmToken,
             hasExpoToken: !!expoToken,
             hasWebToken: !!webToken,
@@ -45,12 +45,12 @@ router.post('/update-token', async (req, res) => {
             requestBody: req.body
         });
 
-        if (!route) {
-            logger.warn('Tentativa de atualização sem route', {
+        if (!email) {
+            logger.warn('Tentativa de atualização sem email', {
                 body: req.body
             });
             return res.status(400).json({
-                error: 'Rota é obrigatória'
+                error: 'Email é obrigatório'
             });
         }
 
@@ -58,7 +58,7 @@ router.post('/update-token', async (req, res) => {
         if (fcmToken) {
             const isValidFCM = FCMService.isValidToken(fcmToken);
             logger.debug('Validação do token FCM', {
-                route,
+                email,
                 fcmTokenLength: fcmToken.length,
                 fcmTokenStartsWith: fcmToken.substring(0, 10),
                 isValid: isValidFCM
@@ -66,7 +66,7 @@ router.post('/update-token', async (req, res) => {
             
             if (!isValidFCM) {
                 logger.warn('Token FCM inválido recebido', {
-                    route,
+                    email,
                     fcmToken: fcmToken.substring(0, 20) + '...',
                     fcmTokenLength: fcmToken.length
                 });
@@ -76,22 +76,21 @@ router.post('/update-token', async (req, res) => {
             }
         }
 
-        // Buscar usuário através da tabela routes
+        // Buscar usuário diretamente pelo email
         logger.debug('Buscando usuário no banco de dados', {
-            route
+            email
         });
         
         const [userResult] = await sequelize.query(
-            `SELECT u.id, u.route, u.fcm_token, u.token_notification_android, u.token_notification_web, u.token_updated_at
-             FROM users u 
-             JOIN routes r ON u.id = r.users_id 
-             WHERE r.name = :route`,
-            { replacements: { route } }
+            `SELECT id, route, fcm_token, token_notification_android, token_notification_web, token_updated_at
+             FROM users 
+             WHERE email = :email`,
+            { replacements: { email } }
         );
 
         if (userResult.length === 0) {
             logger.warn('Usuário não encontrado para atualização de tokens', {
-                route
+                email
             });
             return res.status(404).json({
                 error: 'Usuário não encontrado'
@@ -100,7 +99,7 @@ router.post('/update-token', async (req, res) => {
 
         const userId = userResult[0].id;
         logger.debug('Usuário encontrado', {
-            route,
+            email,
             userId
         });
 
@@ -109,7 +108,7 @@ router.post('/update-token', async (req, res) => {
         const replacements = { userId };
 
         logger.debug('Preparando campos para atualização', {
-            route,
+            email,
             userId,
             hasFCMToken: !!fcmToken,
             hasExpoToken: !!expoToken,
@@ -120,7 +119,7 @@ router.post('/update-token', async (req, res) => {
             updateFields.push('fcm_token = :fcmToken');
             replacements.fcmToken = fcmToken;
             logger.debug('Token FCM será atualizado', {
-                route,
+                email,
                 userId,
                 fcmTokenLength: fcmToken.length
             });
@@ -130,7 +129,7 @@ router.post('/update-token', async (req, res) => {
             updateFields.push('token_notification_android = :expoToken');
             replacements.expoToken = expoToken;
             logger.debug('Token Expo será atualizado', {
-                route,
+                email,
                 userId,
                 expoTokenLength: expoToken.length
             });
@@ -140,7 +139,7 @@ router.post('/update-token', async (req, res) => {
             updateFields.push('token_notification_web = :webToken');
             replacements.webToken = webToken;
             logger.debug('Token Web será atualizado', {
-                route,
+                email,
                 userId,
                 webTokenLength: webToken.length
             });
@@ -151,7 +150,7 @@ router.post('/update-token', async (req, res) => {
             
             const updateQuery = `UPDATE users SET ${updateFields.join(', ')} WHERE id = :userId`;
             logger.debug('Executando query de atualização', {
-                route,
+                email,
                 userId,
                 updateQuery,
                 updateFields: updateFields.length
@@ -161,7 +160,7 @@ router.post('/update-token', async (req, res) => {
 
             logger.info('Tokens atualizados com sucesso', {
                 userId,
-                route,
+                email,
                 hasFCMToken: !!fcmToken,
                 hasExpoToken: !!expoToken,
                 hasWebToken: !!webToken,
@@ -169,7 +168,7 @@ router.post('/update-token', async (req, res) => {
             });
         } else {
             logger.warn('Nenhum token fornecido para atualização', {
-                route,
+                email,
                 userId
             });
         }
@@ -181,7 +180,7 @@ router.post('/update-token', async (req, res) => {
         };
 
         logger.info('Resposta de sucesso enviada', {
-            route,
+            email,
             userId,
             response
         });
@@ -193,7 +192,7 @@ router.post('/update-token', async (req, res) => {
             error: error.message,
             stack: error.stack,
             body: req.body,
-            route: req.body?.route
+            email: req.body?.email
         });
 
         res.status(500).json({

@@ -64,6 +64,13 @@ app.get('/', (req, res) => {
                         <div class="endpoint">POST /auth/verify-token - Verificar JWT</div>
                         <div class="endpoint">POST /auth/refresh-token - Renovar JWT</div>
                         <div class="endpoint">POST /auth/logout - Logout</div>
+                        
+                        <h4>📧 Endpoints de Email:</h4>
+                        <div class="endpoint">POST /email/request-local-password - Solicitar definição de senha</div>
+                        <div class="endpoint">POST /email/request-password-reset - Solicitar redefinição de senha</div>
+                        <div class="endpoint">POST /email/set-password - Definir nova senha</div>
+                        <div class="endpoint">POST /email/reset-password - Redefinir senha</div>
+                        <div class="endpoint">GET /email/verify-token - Verificar validade do token</div>
                     </div>
                     
                     <p><small>Status: ✅ Online | Logs: ✅ Ativos</small></p>
@@ -81,9 +88,10 @@ app.use('/messages', require('./routes/messages'));
 app.use('/tokens', require('./routes/tokens'));
 app.use('/webhook', require('./routes/webhooks'));
 app.use('/sse', require('./routes/sse').router);
-
+app.use('/routes', require('./routes/routes')(sequelize));
 // Rotas existentes...
 app.use('/auth', require('./routes/auth'));
+app.use('/email', require('./routes/email')); // Rotas de email para definição/redefinição de senha
 app.use('/tasks', require('./routes/tasks'));
 app.use('/database', require('./routes/database')(sequelize));
 
