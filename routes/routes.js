@@ -4,6 +4,9 @@ const { logger, loggerMiddleware } = require('../middleware/logger');
 router.use(loggerMiddleware);
 
 const injectDependencies = (sequelize) => {
+  // Log de teste usando o novo logger livre
+  logger.free('Teste do logger livre - Rotas carregadas', { timestamp: new Date().toISOString() });
+  
   router.post('/check-route', async (req, res) => {
     const { userId } = req.body;
 
@@ -128,28 +131,10 @@ const injectDependencies = (sequelize) => {
         }
       );
 
-      // Criar tabela de relacionamento many-to-many se não existir
-      await sequelize.query(`
-        CREATE TABLE IF NOT EXISTS route_users (
-          id SERIAL PRIMARY KEY,
-          route_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          UNIQUE(route_id, user_id),
-          FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE,
-          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-      `);
-
-      // Adicionar o usuário à rota através da tabela de relacionamento
+      // Criar relacionamento na tabela route_users
       await sequelize.query(
-        `INSERT INTO route_users (route_id, user_id) VALUES (:routeId, :userId) ON CONFLICT (route_id, user_id) DO NOTHING`,
-        { 
-          replacements: { 
-            routeId,
-            userId: user.id
-          } 
-        }
+        `INSERT INTO route_users (route_id, user_id) VALUES (:routeId, :userId)`,
+        { replacements: { routeId, userId: user.id } }
       );
 
       res.status(200).json({ 
@@ -167,6 +152,116 @@ const injectDependencies = (sequelize) => {
     } catch (error) {
       console.error('Erro ao adicionar rota ao usuário:', error);
       res.status(500).json({ error: 'Erro interno do servidor ao processar a solicitação.' });
+    }
+  });
+
+  // NOVO ENDPOINT: Buscar usuários por ID da rota
+  router.get('/get-users-by-route/:routeId', async (req, res) => {
+    const { routeId } = req.params;
+        
+    if (!routeId) {
+      return res.status(400).json({ error: 'ID da rota é obrigatório.' });
+    }
+
+    logger.route('Buscando usuários por ID da rota', { routeId });
+    
+    try {
+      // Consultar a tabela route_users para encontrar todos os usuários associados à rota
+      const [usersResult] = await sequelize.query(
+        `SELECT ru.user_id, u.id, u.first_name, u.last_name, u.email, u.route, u.created_at
+         FROM route_users ru
+         JOIN users u ON ru.user_id = u.id
+         WHERE ru.route_id = :routeId`,
+        { replacements: { routeId } }
+      );
+      logger.raw('Resultado da consulta de usuários por rota', { usersResult, routeId });
+      if (usersResult.length === 0) {
+        return res.status(200).json({ 
+          success: true, 
+          message: 'Nenhum usuário encontrado para esta rota.',
+          routeId: routeId,
+          users: [],
+          count: 0
+        });
+      }
+
+      res.status(200).json({ 
+        success: true, 
+        message: 'Usuários encontrados com sucesso.',
+        routeId: routeId,
+        users: usersResult,
+        count: usersResult.length
+      });
+
+    } catch (error) {
+      console.error('Erro ao buscar usuários por rota:', error);
+      logger.error('Erro ao buscar usuários por rota', { error: error.message, routeId });
+      res.status(500).json({ error: 'Erro interno do servidor ao buscar usuários.' });
+    }
+  });
+
+  // NOVO ENDPOINT: Remover rota compartilhada do usuário
+  router.delete('/remove-route-from-user', async (req, res) => {
+    const { email, routeId } = req.body;
+    
+    if (!email || !routeId) {
+      return res.status(400).json({ error: 'Email e ID da rota são obrigatórios.' });
+    }
+
+    logger.user('Removendo rota compartilhada do usuário', { email, routeId });
+    
+    try {
+      // Verificar se o email existe no banco
+      const [userResult] = await sequelize.query(
+        `SELECT id, routes FROM users WHERE email = :email`,
+        { replacements: { email } }
+      );
+
+      if (userResult.length === 0) {
+        return res.status(404).json({ error: 'Email não encontrado no banco de dados.' });
+      }
+
+      const user = userResult[0];
+      let userRoutes = user.routes || [];
+
+      // Verificar se a rota existe no array do usuário
+      if (!userRoutes.includes(routeId)) {
+        return res.status(400).json({ error: 'Esta rota não está associada ao usuário.' });
+      }
+
+      // Remover a rota do array
+      userRoutes = userRoutes.filter(route => route !== routeId);
+
+      // Atualizar o campo routes do usuário
+      await sequelize.query(
+        `UPDATE users SET routes = :routes WHERE id = :userId`,
+        { 
+          replacements: { 
+            routes: JSON.stringify(userRoutes), 
+            userId: user.id 
+          } 
+        }
+      );
+
+      // Remover o relacionamento da tabela route_users
+      await sequelize.query(
+        `DELETE FROM route_users WHERE route_id = :routeId AND user_id = :userId`,
+        { replacements: { routeId, userId: user.id } }
+      );
+
+      res.status(200).json({ 
+        success: true, 
+        message: 'Rota compartilhada removida com sucesso.',
+        userId: user.id,
+        removedRouteId: routeId,
+        updatedRoutes: userRoutes,
+        count: userRoutes.length
+      });
+
+    } catch (error) {
+      console.error('Erro ao remover rota compartilhada:', error);
+      logger.error('Erro ao remover rota compartilhada', { error: error.message, email, routeId });
+      res.status(500).json({ error: 'Erro interno do servidor ao remover rota compartilhada.' });
     }
   });
 

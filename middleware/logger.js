@@ -44,7 +44,7 @@ const getSaoPauloTimestamp = () => {
 
 // Configuração do Winston
 const logger = winston.createLogger({
-    level: 'info',
+    level: 'debug', // Mudando para debug para garantir que todos os logs apareçam
     format: winston.format.combine(
         winston.format.timestamp({
             format: 'YYYY-MM-DD HH:mm:ss'
@@ -76,6 +76,8 @@ const logger = winston.createLogger({
     ]
 });
 
+// Log de teste para verificar se o Winston está funcionando
+logger.info('Logger Winston inicializado com sucesso', { timestamp: new Date().toISOString() });
 
 
 // Adiciona método message ao logger
@@ -119,34 +121,65 @@ logger.google = function (message, metadata = {}) {
     this.info(message, { ...metadata, type: 'google' });
 };
 
+// Adiciona método para logs livres sem formatação
+logger.free = function (message, metadata = {}) {
+    // Log direto no console sem formatação Winston
+    console.log(`[FREE LOG] ${message}`, metadata);
+    
+    // Também loga no Winston para arquivos, mas sem formatação especial
+    this.info(message, { ...metadata, type: 'free', raw: true });
+};
+
+// Adiciona método raw para logs completamente brutos
+logger.raw = function (message, metadata = {}) {
+    // Log direto no console sem nenhuma formatação
+    console.log(message, metadata);
+};
+
 // Middleware de logging
 const loggerMiddleware = (req, res, next) => {
     const start = Date.now();
 
+    // Filtrar endpoints que não devem ser logados para evitar spam
+    const shouldSkipLogging = (path) => {
+        const skipPatterns = [
+            /^\/get-messages\/\d+$/,  // Endpoints de get-messages com ID
+            /^\/sse\/.+$/,            // Conexões SSE
+            /^\/messages\/get-messages\/\d+$/  // Endpoints de mensagens com ID
+        ];
+        
+        return skipPatterns.some(pattern => pattern.test(path));
+    };
+
     // Formata o body antes de fazer o log
     const formattedBody = formatRequestBody(req.body);
 
-    // Log da requisição recebida
-    logger.info(`${req.method} ${req.path}`, {
-        method: req.method,
-        path: req.path,
-        query: req.query,
-        body: formattedBody,
-        ip: req.ip || req.connection.remoteAddress,
-        userAgent: req.get('User-Agent')
-    });
+    // Log da requisição recebida (apenas para endpoints não filtrados)
+    if (!shouldSkipLogging(req.path)) {
+        logger.info(`${req.method} ${req.path}`, {
+            method: req.method,
+            path: req.path,
+            query: req.query,
+            body: formattedBody,
+            ip: req.ip || req.connection.remoteAddress,
+            userAgent: req.get('User-Agent')
+        });
+    }
 
     // Intercepta o envio da resposta
     res.on('finish', () => {
         const duration = Date.now() - start;
         
-        logger.info(`Response ${req.method} ${req.path}`, {
-            method: req.method,
-            path: req.path,
-            statusCode: res.statusCode,
-            duration: `${duration}ms`,
-            contentLength: res.get('content-length') || 0
-        });
+        // Log da resposta (apenas para endpoints não filtrados)
+        if (!shouldSkipLogging(req.path)) {
+            logger.info(`Response ${req.method} ${req.path}`, {
+                method: req.method,
+                path: req.path,
+                statusCode: res.statusCode,
+                duration: `${duration}ms`,
+                contentLength: res.get('content-length') || 0
+            });
+        }
     });
 
     next();

@@ -57,11 +57,10 @@ async function processMessageSend(req, res, messageType, content, route) {
       });
     }
 
-    // Verificar se a rota existe
+    // Verificar se a rota existe e buscar todos os usuários associados
     const [routeResult] = await sequelize.query(
-      `SELECT r.id, r.name, r.token, u.id as user_id, u.name as user_name, u.fcm_token
+      `SELECT r.id, r.name, r.token, r.users_id
        FROM routes r 
-       JOIN users u ON r.users_id = u.id 
        WHERE r.name = :route`,
       { replacements: { route: route.trim() } }
     );
@@ -74,81 +73,178 @@ async function processMessageSend(req, res, messageType, content, route) {
 
     const routeData = routeResult[0];
 
-    // Inserir mensagem no banco
-    const [insertResult] = await sequelize.query(
-      `INSERT INTO messages (
-          message, type, category, route, channel, content, custom_attributes, 
-          route_id, user_id, datetime, status
-      ) VALUES (
-          :message, :type, :category, :route, :channel, :content, :custom_attributes,
-          :route_id, :user_id, NOW(), 'active'
-      ) RETURNING *`,
-      {
-        replacements: {
-          message,
-          type,
-          category,
-          route,
-          channel,
-          content: content.trim(),
-          custom_attributes: custom_attributes ? JSON.stringify(custom_attributes) : null,
-          route_id: routeData.id,
-          user_id: routeData.user_id
-        }
-      }
+    // Buscar o dono da rota
+    const [ownerResult] = await sequelize.query(
+      `SELECT u.id, u.first_name, u.last_name, u.fcm_token
+       FROM users u
+       WHERE u.id = :owner_id`,
+      { replacements: { owner_id: routeData.users_id } }
     );
 
-    const insertedMessage = insertResult[0];
-
-    // Enviar notificação via FCM (se token disponível)
-    let fcmResult = null;
-    if (routeData.fcm_token) {
-      fcmResult = await FCMService.sendPushNotification(routeData.fcm_token, {
-        id: insertedMessage.id,
-        message,
-        type,
-        category,
-        route,
-        channel,
-        content,
-        custom_attributes,
-        user_id: routeData.user_id
+    if (ownerResult.length === 0) {
+      return res.status(404).json({
+        error: 'Dono da rota não encontrado'
       });
     }
 
-    // Notificar app frontend via SSE
-    const sseResult = sendMessageNotification(routeData.name, insertedMessage);
+    const routeOwner = ownerResult[0];
 
-    // Log do resultado
-    const fcmSuccess = fcmResult?.success || false;
-    const sseSuccess = sseResult.success;
+    // Buscar todos os usuários associados à rota através da tabela route_users
+    const [sharedUsersResult] = await sequelize.query(
+      `SELECT ru.user_id, u.id, u.first_name, u.last_name, u.fcm_token
+       FROM route_users ru
+       JOIN users u ON ru.user_id = u.id
+       WHERE ru.route_id = :route_id`,
+      { replacements: { route_id: routeData.id } }
+    );
+
+    // Combinar o dono da rota com os usuários compartilhados
+    const allUsers = [routeOwner, ...sharedUsersResult];
+
+    if (allUsers.length === 0) {
+      return res.status(404).json({
+        error: 'Nenhum usuário encontrado para esta rota'
+      });
+    }
+
+    // Array para armazenar resultados de envio para cada usuário
+    const deliveryResults = [];
+
+    // Processar envio para cada usuário da rota (incluindo o dono)
+    for (const userData of allUsers) {
+      try {
+        // Inserir mensagem no banco para cada usuário
+        const [insertResult] = await sequelize.query(
+          `INSERT INTO messages (
+              message, type, category, route, channel, content, custom_attributes, 
+              route_id, user_id, datetime, status
+          ) VALUES (
+              :message, :type, :category, :route, :channel, :content, :custom_attributes,
+              :route_id, :user_id, NOW(), 'active'
+          ) RETURNING *`,
+          {
+            replacements: {
+              message,
+              type,
+              category,
+              route,
+              channel,
+              content: content.trim(),
+              custom_attributes: custom_attributes ? JSON.stringify(custom_attributes) : null,
+              route_id: routeData.id,
+              user_id: userData.id
+            }
+          }
+        );
+
+        const insertedMessage = insertResult[0];
+
+        // Enviar notificação via FCM (se token disponível)
+        let fcmResult = null;
+        if (userData.fcm_token) {
+          fcmResult = await FCMService.sendPushNotification(userData.fcm_token, {
+            id: insertedMessage.id,
+            message,
+            type,
+            category,
+            route,
+            channel,
+            content,
+            custom_attributes,
+            user_id: userData.id
+          });
+        }
+
+        // Notificar app frontend via SSE
+        const sseResult = sendMessageNotification(routeData.name, insertedMessage);
+
+        // Log do resultado para este usuário
+        const fcmSuccess = fcmResult?.success || false;
+        const sseSuccess = sseResult.success;
+        const fullName = `${userData.first_name} ${userData.last_name}`.trim();
+        
+        // Determinar se é o dono da rota ou usuário compartilhado
+        const isOwner = userData.id === routeData.users_id;
+        const userType = isOwner ? 'owner' : 'shared';
+        
+        logger.delivery('Mensagem processada para usuário da rota', {
+          messageId: insertedMessage.id,
+          userId: userData.id,
+          userName: fullName,
+          userType,
+          type,
+          category,
+          route: routeData.name,
+          channel,
+          fcmSuccess,
+        });
+
+        // Armazenar resultado para este usuário
+        deliveryResults.push({
+          userId: userData.id,
+          userName: fullName,
+          userType,
+          messageId: insertedMessage.id,
+          fcmSuccess,
+          overallDelivery: fcmSuccess ? 'CONNECTED' : 'DISCONNECTED'
+        });
+
+
+      } catch (userError) {
+        const fullName = `${userData.first_name} ${userData.last_name}`.trim();
+        
+        const isOwner = userData.id === routeData.users_id;
+        const userType = isOwner ? 'owner' : 'shared';
+        
+        logger.error('Erro ao processar mensagem para usuário específico', {
+          error: userError.message,
+          userId: userData.id,
+          userName: fullName,
+          userType,
+          route: routeData.name
+        });
+
+        // Adicionar resultado de erro para este usuário
+        deliveryResults.push({
+          userId: userData.id,
+          userName: fullName,
+          userType,
+          error: userError.message,
+          overallDelivery: 'FAILED'
+        });
+      }
+    }
+
+    // Log resumo final
+    const successCount = deliveryResults.filter(r => r.overallDelivery === 'SUCCESS').length;
+    const totalUsers = deliveryResults.length;
     
-    logger.delivery('Mensagem processada', {
-      messageId: insertedMessage.id,
-      type,
-      category,
+    logger.delivery('Resumo do processamento de mensagem para rota compartilhada', {
       route: routeData.name,
-      channel,
-      fcmSuccess,
-      sseSuccess,
-      overallDelivery: fcmSuccess || sseSuccess ? 'SUCCESS' : 'FAILED'
+      routeOwner: {
+        id: routeOwner.id,
+        name: `${routeOwner.first_name} ${routeOwner.last_name}`.trim()
+      },
+      totalUsers,
+      deliveryResults
     });
     
     res.json({
       success: true,
-      message: 'Mensagem enviada com sucesso',
-      messageId: insertedMessage.id,
-      type,
-      category,
-      route,
-      channel,
-      fcmSuccess,
-      sseSuccess,
-      overallDelivery: fcmSuccess || sseSuccess ? 'SUCCESS' : 'FAILED'
+      message: 'Mensagem processada para todos os usuários da rota (incluindo o dono)',
+      route: routeData.name,
+      routeOwner: {
+        id: routeOwner.id,
+        name: `${routeOwner.first_name} ${routeOwner.last_name}`.trim()
+      },
+      totalUsers,
+      successCount,
+      failureCount: totalUsers - successCount,
+      deliveryResults
     });
 
   } catch (error) {
-    logger.error('Erro ao processar mensagem', {
+    logger.error('Erro ao processar mensagem para rota compartilhada', {
       error: error.message,
       body: req.body
     });
@@ -519,10 +615,6 @@ async function sendNotificationWithPriority(messageData, user, req) {
             fcm: fcmSuccess,
             expo: results.expo?.success || false,
             web: results.web?.success || false
-        },
-        deliveryStatus: {
-            pushNotification: fcmSuccess ? 'DELIVERED' : 'FAILED',
-            overallSuccess: successCount > 0 ? 'PARTIAL' : 'FAILED'
         }
     });
 
