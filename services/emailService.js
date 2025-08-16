@@ -59,9 +59,9 @@ class EmailService {
     async sendSetPasswordEmail(email, token) {
         try {
             const deeplinkUrl = `myapp://set-password?token=${token}&email=${encodeURIComponent(email)}`;
-            const redirectUrl = `https://1bf410f736be.ngrok-free.app/email/redirect/password/${token}?email=${encodeURIComponent(email)}`;
-            const httpsUrl = `https://seudominio.com/set-password?token=${token}&email=${encodeURIComponent(email)}`;
-            const fallbackUrl = `https://seudominio.com/fallback?action=set-password&token=${token}&email=${encodeURIComponent(email)}`;
+            const redirectUrl = `https://api.easynotificationspost.dev/email/redirect/password/${token}?email=${encodeURIComponent(email)}`;
+            const httpsUrl = `https://api.easynotificationspost.dev/set-password?token=${token}&email=${encodeURIComponent(email)}`;
+            const fallbackUrl = `https://api.easynotificationspost.dev/fallback?action=set-password&token=${token}&email=${encodeURIComponent(email)}`;
             const resetUrl = redirectUrl;
             
             // Log dos URLs gerados para debug
@@ -163,9 +163,9 @@ class EmailService {
     async sendResetPasswordEmail(email, token) {
         try {
             const deeplinkUrl = `myapp://reset-password?token=${token}&email=${encodeURIComponent(email)}`;
-            const redirectUrl = `https://1bf410f736be.ngrok-free.app/email/redirect/password/${token}?email=${encodeURIComponent(email)}`;
-            const httpsUrl = `https://seudominio.com/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
-            const fallbackUrl = `https://seudominio.com/fallback?action=reset-password&token=${token}&email=${encodeURIComponent(email)}`;
+            const redirectUrl = `https://api.easynotificationspost.dev/email/redirect/password/${token}?email=${encodeURIComponent(email)}`;
+            const httpsUrl = `https://api.easynotificationspost.dev/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
+            const fallbackUrl = `https://api.easynotificationspost.dev/fallback?action=reset-password&token=${token}&email=${encodeURIComponent(email)}`;
             const resetUrl = redirectUrl;
             
             // Log dos URLs gerados para debug

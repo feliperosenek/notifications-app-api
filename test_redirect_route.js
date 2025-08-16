@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 // Configuração base para os testes
-const BASE_URL = 'https://1bf410f736be.ngrok-free.app';
+const BASE_URL = 'https://api.easynotificationspost.dev';
 const TEST_EMAIL = 'feliperosenek@gmail.com';
 
 // Função para fazer requisições HTTP
