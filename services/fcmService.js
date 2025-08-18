@@ -13,11 +13,10 @@ class FCMService {
         try {
             const message = {
                 token: token,
-                notification: {
-                    title: `${messageData.type.toUpperCase()} - ${messageData.message}`,
-                    body: messageData.content
-                },
                 data: {
+                    // ✅ Título e corpo movidos para data para funcionar em background
+                    title: `${messageData.type.toUpperCase()} - ${messageData.message}`,
+                    body: messageData.content,
                     messageId: String(messageData.id || ''),
                     type: String(messageData.type || ''),
                     category: String(messageData.category || ''),
@@ -31,15 +30,8 @@ class FCMService {
                     status: String(messageData.status || '')
                 },
                 android: {
-                    priority: 'high',
-                    notification: {
-                        channelId: messageData.type,
-                        priority: 'high',
-                        defaultSound: true,
-                        defaultVibrateTimings: true,
-                        icon: 'notification_icon',
-                        color: this.getColorByType(messageData.type)
-                    }
+                    priority: 'high'
+                    // ❌ android.notification removido - não funciona com data-only payload
                 },
                 apns: {
                     payload: {
@@ -51,22 +43,22 @@ class FCMService {
                 }
             };
 
-            logger.message('Enviando notificação FCM', {
+            logger.message('Enviando notificação FCM data-only', {
                 token: token.substring(0, 20) + '...',
                 messageId: messageData.id,
                 type: messageData.type
             });
 
             // Log dos dados que serão enviados para debug
-            logger.debug('Dados da mensagem FCM', {
+            logger.debug('Payload FCM corrigido - data-only', {
                 messageId: messageData.id,
                 dataFields: Object.keys(message.data),
-                dataValues: message.data
+                isDataOnly: !message.notification
             });
 
             const response = await messaging.send(message);
             
-            logger.message('Notificação FCM enviada com sucesso', {
+            logger.message('Notificação FCM data-only enviada com sucesso', {
                 messageId: messageData.id,
                 response: response
             });
@@ -111,11 +103,10 @@ class FCMService {
     static async sendMulticastNotification(tokens, messageData) {
         try {
             const message = {
-                notification: {
-                    title: `${messageData.type.toUpperCase()} - ${messageData.message}`,
-                    body: messageData.content
-                },
                 data: {
+                    // ✅ Título e corpo movidos para data para funcionar em background
+                    title: `${messageData.type.toUpperCase()} - ${messageData.message}`,
+                    body: messageData.content,
                     messageId: String(messageData.id || ''),
                     type: String(messageData.type || ''),
                     category: String(messageData.category || ''),
@@ -129,15 +120,8 @@ class FCMService {
                     status: String(messageData.status || '')
                 },
                 android: {
-                    priority: 'high',
-                    notification: {
-                        channelId: messageData.type,
-                        priority: 'high',
-                        defaultSound: true,
-                        defaultVibrateTimings: true,
-                        icon: 'notification_icon',
-                        color: this.getColorByType(messageData.type)
-                    }
+                    priority: 'high'
+                    // ❌ android.notification removido - não funciona com data-only payload
                 }
             };
 
@@ -146,7 +130,7 @@ class FCMService {
                 ...message
             });
 
-            logger.message('Notificação FCM multicast enviada', {
+            logger.message('Notificação FCM multicast data-only enviada', {
                 messageId: messageData.id,
                 successCount: response.successCount,
                 failureCount: response.failureCount
