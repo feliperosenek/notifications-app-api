@@ -113,8 +113,6 @@ app.use((error, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     logger.info(`Servidor iniciado na porta ${PORT}`);
-    logger.info('Sistema de notificações com FCM nativo ativo');
-    logger.info('Novos endpoints implementados: /send-image, /send-audio');
 });
 
 module.exports = { app, server, sequelize }; 

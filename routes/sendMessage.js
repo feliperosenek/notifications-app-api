@@ -41,6 +41,44 @@ function isValidAudioUrl(url) {
 }
 
 /**
+ * Função auxiliar para validar e processar o campo content
+ */
+function validateAndProcessContent(content) {
+  if (typeof content === 'string') {
+    return { isValid: true, processedContent: content.trim() };
+  }
+  
+  if (typeof content === 'object' || Array.isArray(content)) {
+    try {
+      const jsonString = JSON.stringify(content);
+      return { 
+        isValid: true, 
+        processedContent: jsonString,
+        wasConverted: true,
+        originalType: Array.isArray(content) ? 'array' : 'object'
+      };
+    } catch (error) {
+      return { 
+        isValid: false, 
+        error: 'Não foi possível converter o objeto/array para string JSON'
+      };
+    }
+  }
+  
+  if (content === null || content === undefined) {
+    return { isValid: false, error: 'Campo content não pode ser null ou undefined' };
+  }
+  
+  // Para outros tipos (number, boolean), converter para string
+  return { 
+    isValid: true, 
+    processedContent: String(content),
+    wasConverted: true,
+    originalType: typeof content
+  };
+}
+
+/**
  * Função auxiliar para processar envio de mensagem
  */
 async function processMessageSend(req, res, messageType, content, route) {
@@ -142,50 +180,56 @@ async function processMessageSend(req, res, messageType, content, route) {
         // Enviar notificação via FCM (se token disponível)
         let fcmResult = null;
         if (userData.fcm_token) {
-          fcmResult = await FCMService.sendPushNotification(userData.fcm_token, {
-            id: insertedMessage.id,
-            message,
-            type,
-            category,
-            route,
-            channel,
-            content,
-            custom_attributes,
-            user_id: userData.id
-          });
+          try {
+            fcmResult = await FCMService.sendPushNotification(userData.fcm_token, {
+              id: insertedMessage.id,
+              message,
+              type,
+              category,
+              route,
+              channel,
+              content,
+              custom_attributes,
+              user_id: userData.id
+            });
+          } catch (fcmError) {
+            logger.error('Erro ao enviar notificação FCM', {
+              error: fcmError.message,
+              messageId: insertedMessage.id,
+              userId: userData.id,
+              userName: `${userData.first_name} ${userData.last_name}`.trim(),
+              token: userData.fcm_token ? userData.fcm_token.substring(0, 20) + '...' : 'N/A'
+            });
+            
+            fcmResult = {
+              success: false,
+              error: 'FCM_EXCEPTION',
+              message: fcmError.message
+            };
+          }
         }
 
         // Notificar app frontend via SSE
-        const sseResult = sendMessageNotification(routeData.name, insertedMessage);
+        sendMessageNotification(routeData.name, insertedMessage);
 
-        // Log do resultado para este usuário
-        const fcmSuccess = fcmResult?.success || false;
-        const sseSuccess = sseResult.success;
+        // Preparar dados consolidados para este usuário
         const fullName = `${userData.first_name} ${userData.last_name}`.trim();
-        
-        // Determinar se é o dono da rota ou usuário compartilhado
         const isOwner = userData.id === routeData.users_id;
         const userType = isOwner ? 'owner' : 'shared';
-        
-        logger.delivery('Mensagem processada para usuário da rota', {
-          messageId: insertedMessage.id,
-          userId: userData.id,
-          userName: fullName,
-          userType,
-          type,
-          category,
-          route: routeData.name,
-          channel,
-          fcmSuccess,
-        });
+        const fcmSuccess = fcmResult?.success || false;
 
-        // Armazenar resultado para este usuário
+        // Armazenar resultado consolidado para este usuário
         deliveryResults.push({
           userId: userData.id,
           userName: fullName,
           userType,
           messageId: insertedMessage.id,
-          fcmSuccess,
+          fcm: {
+            success: fcmSuccess,
+            error: fcmResult?.error || null,
+            message: fcmResult?.message || null,
+            hasToken: !!userData.fcm_token
+          },
           overallDelivery: fcmSuccess ? 'CONNECTED' : 'DISCONNECTED'
         });
 
@@ -215,23 +259,12 @@ async function processMessageSend(req, res, messageType, content, route) {
       }
     }
 
-    // Log resumo final
-    const successCount = deliveryResults.filter(r => r.overallDelivery === 'SUCCESS').length;
+    // Log resumo final consolidado
+    const successCount = deliveryResults.filter(r => r.overallDelivery === 'CONNECTED').length;
     const totalUsers = deliveryResults.length;
     
-    logger.delivery('Resumo do processamento de mensagem para rota compartilhada', {
-      route: routeData.name,
-      routeOwner: {
-        id: routeOwner.id,
-        name: `${routeOwner.first_name} ${routeOwner.last_name}`.trim()
-      },
-      totalUsers,
-      deliveryResults
-    });
-    
-    res.json({
-      success: true,
-      message: 'Mensagem processada para todos os usuários da rota (incluindo o dono)',
+    // Log consolidado para análise
+    logger.delivery('New Message!', {
       route: routeData.name,
       routeOwner: {
         id: routeOwner.id,
@@ -240,6 +273,26 @@ async function processMessageSend(req, res, messageType, content, route) {
       totalUsers,
       successCount,
       failureCount: totalUsers - successCount,
+      deliveryResults,
+      summary: {
+        fcm: {
+          total: totalUsers,
+          success: deliveryResults.filter(r => r.fcm?.success).length,
+          failed: deliveryResults.filter(r => r.fcm && !r.fcm.success).length,
+          noToken: deliveryResults.filter(r => !r.fcm?.hasToken).length
+        }
+      }
+    });
+    
+    // Retorno original da API
+    res.json({
+      success: true,
+      route: routeData.name,
+      routeOwner: {
+        id: routeOwner.id,
+        name: `${routeOwner.first_name} ${routeOwner.last_name}`.trim()
+      },
+      totalUsers,
       deliveryResults
     });
 
@@ -272,7 +325,17 @@ router.post('/', messageRateLimit, async (req, res) => {
     });
   }
 
-  await processMessageSend(req, res, type, content, route);
+  // Validação e processamento do campo content
+  const contentValidation = validateAndProcessContent(content);
+  if (!contentValidation.isValid) {
+    return res.status(400).json({
+      error: contentValidation.error
+    });
+  }
+
+  // Log removido - será consolidado no final
+
+  await processMessageSend(req, res, type, contentValidation.processedContent, route);
 });
 
 /**
@@ -292,14 +355,24 @@ router.post('/send-image', messageRateLimit, async (req, res) => {
     });
   }
 
-  // Validação específica para imagem
-  if (!isValidImageUrl(content)) {
+  // Validação e processamento do campo content
+  const contentValidation = validateAndProcessContent(content);
+  if (!contentValidation.isValid) {
+    return res.status(400).json({
+      error: contentValidation.error
+    });
+  }
+
+  // Log removido - será consolidado no final
+
+  // Validação específica para imagem (usar o content processado)
+  if (!isValidImageUrl(contentValidation.processedContent)) {
     return res.status(400).json({
       error: 'URL da imagem deve ser HTTPS válida com extensão de imagem (.jpg, .png, .gif, etc.)'
     });
   }
 
-  await processMessageSend(req, res, type, content, route);
+  await processMessageSend(req, res, type, contentValidation.processedContent, route);
 });
 
 /**
@@ -319,14 +392,24 @@ router.post('/send-audio', messageRateLimit, async (req, res) => {
     });
   }
 
-  // Validação específica para áudio
-  if (!isValidAudioUrl(content)) {
+  // Validação e processamento do campo content
+  const contentValidation = validateAndProcessContent(content);
+  if (!contentValidation.isValid) {
+    return res.status(400).json({
+      error: contentValidation.error
+    });
+  }
+
+  // Log removido - será consolidado no final
+
+  // Validação específica para áudio (usar o content processado)
+  if (!isValidAudioUrl(contentValidation.processedContent)) {
     return res.status(400).json({
       error: 'URL do áudio deve ser HTTPS válida com extensão de áudio (.mp3, .wav, .ogg, etc.)'
     });
   }
 
-  await processMessageSend(req, res, type, content, route);
+  await processMessageSend(req, res, type, contentValidation.processedContent, route);
 });
 
 /**
@@ -388,22 +471,16 @@ router.post('/legacy', messageRateLimit, async (req, res) => {
         const deliveryResults = await sendNotificationWithPriority(insertedMessage, user, req);
 
         // 3. SSE - Notificar app frontend sobre nova mensagem
-        const sseResult = sendMessageNotification(route, insertedMessage);
+        sendMessageNotification(route, insertedMessage);
 
-        // Log do resultado
+        // Log consolidado do resultado
         const fcmSuccess = deliveryResults.fcm?.success || false;
-        const sseSuccess = sseResult.success;
         
-        logger.delivery('Mensagem processada com FCM e SSE', {
+        logger.delivery('Mensagem processada', {
             messageId: insertedMessage.id,
             route,
             deliveryResults,
-            sseResult,
-            fcmSuccess,
-            sseSuccess,
-            pushDelivered: fcmSuccess,
-            appNotified: sseSuccess,
-            overallDelivery: fcmSuccess || sseSuccess ? 'SUCCESS' : 'FAILED'
+            overallDelivery: fcmSuccess ? 'SUCCESS' : 'FAILED'
         });
         
         res.json({
@@ -411,12 +488,7 @@ router.post('/legacy', messageRateLimit, async (req, res) => {
             message: 'Notificação enviada com sucesso',
             messageId: insertedMessage.id,
             delivery: deliveryResults,
-            sse: sseResult,
-            fcmSuccess,
-            sseSuccess,
-            pushDelivered: fcmSuccess,
-            appNotified: sseSuccess,
-            overallDelivery: fcmSuccess || sseSuccess ? 'SUCCESS' : 'FAILED'
+            overallDelivery: fcmSuccess ? 'SUCCESS' : 'FAILED'
         });
 
     } catch (error) {
@@ -446,49 +518,24 @@ async function sendNotificationWithPriority(messageData, user, req) {
         web: null
     };
 
-    logger.message('Iniciando envio com FCM', {
-        messageId: messageData.id,
-        route: messageData.route,
-        hasFcmToken: !!user.fcm_token,
-        fcmTokenLength: user.fcm_token ? user.fcm_token.length : 0,
-        fcmTokenStart: user.fcm_token ? user.fcm_token.substring(0, 10) : 'N/A',
-        hasExpoToken: !!user.token_notification_android,
-        hasWebToken: !!user.token_notification_web
-    });
+    // Log removido - será consolidado no final
 
     // 1. PRIORIDADE: FCM Push (sempre funciona, mesmo com app fechado)
     if (user.fcm_token) {
         const isValidFcmToken = FCMService.isValidToken(user.fcm_token);
         
-        logger.message('Verificando token FCM', {
-            messageId: messageData.id,
-            hasToken: !!user.fcm_token,
-            tokenLength: user.fcm_token.length,
-            tokenStart: user.fcm_token.substring(0, 20) + '...',
-            isValidToken: isValidFcmToken,
-            tokenStartsWithFmep: user.fcm_token.startsWith('fMEP')
-        });
+        // Log removido - será consolidado no final
 
         if (isValidFcmToken) {
             try {
-                logger.message('Tentando envio FCM', {
-                    messageId: messageData.id,
-                    token: user.fcm_token.substring(0, 20) + '...'
-                });
+                // Log removido - será consolidado no final
 
                 results.fcm = await FCMService.sendPushNotification(user.fcm_token, messageData);
                 
                 if (results.fcm.success) {
-                    logger.message('Notificação FCM enviada com sucesso', {
-                        messageId: messageData.id,
-                        token: user.fcm_token.substring(0, 20) + '...'
-                    });
+                    // Log removido - será consolidado no final
                 } else {
-                    logger.warn('FCM falhou - tentando fallbacks', {
-                        messageId: messageData.id,
-                        fcmError: results.fcm.error,
-                        fcmMessage: results.fcm.message
-                    });
+                    // Log removido - será consolidado no final
                 }
             } catch (error) {
                 logger.error('Erro ao enviar FCM', {
@@ -503,12 +550,7 @@ async function sendNotificationWithPriority(messageData, user, req) {
                 };
             }
         } else {
-            logger.warn('Token FCM inválido', {
-                messageId: messageData.id,
-                token: user.fcm_token.substring(0, 20) + '...',
-                tokenLength: user.fcm_token.length,
-                expectedStart: 'fMEP'
-            });
+            // Log removido - será consolidado no final
             results.fcm = {
                 success: false,
                 error: 'INVALID_FCM_TOKEN',
@@ -516,10 +558,7 @@ async function sendNotificationWithPriority(messageData, user, req) {
             };
         }
     } else {
-        logger.message('FCM não disponível - sem token', {
-            messageId: messageData.id,
-            hasToken: !!user.fcm_token
-        });
+        // Log removido - será consolidado no final
         results.fcm = {
             success: false,
             error: 'NO_FCM_TOKEN',
@@ -559,31 +598,20 @@ async function sendNotificationWithPriority(messageData, user, req) {
             };
         }
     } else {
-        logger.message('Expo não disponível', {
-            messageId: messageData.id,
-            hasFcmToken: !!user.fcm_token,
-            hasExpoToken: !!user.token_notification_android
-        });
+        // Log removido - será consolidado no final
     }
 
     // 4. FALLBACK: Web Push (se aplicável)
     if (user.token_notification_web) {
         try {
-            logger.message('Tentando envio Web Push', {
-                messageId: messageData.id
-            });
+            // Log removido - será consolidado no final
 
             results.web = await sendWebPushNotification(user.token_notification_web, messageData);
             
             if (results.web.success) {
-                logger.message('Notificação Web enviada (fallback)', {
-                    messageId: messageData.id
-                });
+                // Log removido - será consolidado no final
             } else {
-                logger.warn('Web Push falhou', {
-                    messageId: messageData.id,
-                    webError: results.web.error
-                });
+                // Log removido - será consolidado no final
             }
         } catch (error) {
             logger.error('Erro ao enviar Web Push', {
@@ -597,26 +625,14 @@ async function sendNotificationWithPriority(messageData, user, req) {
             };
         }
     } else {
-        logger.message('Web Push não disponível', {
-            messageId: messageData.id,
-            hasWebToken: !!user.token_notification_web
-        });
+        // Log removido - será consolidado no final
     }
 
     // Log resumo final
     const successCount = Object.values(results).filter(r => r && r.success).length;
     const fcmSuccess = results.fcm?.success || false;
     
-    logger.message('Resumo do envio', {
-        messageId: messageData.id,
-        successCount,
-        totalMethods: 3,
-        results: {
-            fcm: fcmSuccess,
-            expo: results.expo?.success || false,
-            web: results.web?.success || false
-        }
-    });
+    // Log removido - será consolidado no final
 
     return results;
 }
@@ -654,10 +670,7 @@ async function sendExpoPushNotification(token, messageData) {
             }
         };
 
-        logger.message('Enviando notificação Expo', {
-            messageId: messageData.id,
-            token: token.substring(0, 20) + '...'
-        });
+        // Log removido - será consolidado no final
 
         const response = await fetch('https://exp.host/--/api/v2/push/send', {
             method: 'POST',

@@ -43,25 +43,7 @@ class FCMService {
                 }
             };
 
-            logger.message('Enviando notificação FCM data-only', {
-                token: token.substring(0, 20) + '...',
-                messageId: messageData.id,
-                type: messageData.type
-            });
-
-            // Log dos dados que serão enviados para debug
-            logger.debug('Payload FCM corrigido - data-only', {
-                messageId: messageData.id,
-                dataFields: Object.keys(message.data),
-                isDataOnly: !message.notification
-            });
-
             const response = await messaging.send(message);
-            
-            logger.message('Notificação FCM data-only enviada com sucesso', {
-                messageId: messageData.id,
-                response: response
-            });
 
             return {
                 success: true,
@@ -72,8 +54,10 @@ class FCMService {
         } catch (error) {
             logger.error('Erro ao enviar notificação FCM', {
                 error: error.message,
+                errorCode: error.code || 'UNKNOWN',
                 messageId: messageData.id,
-                token: token.substring(0, 20) + '...'
+                token: token.substring(0, 20) + '...',
+                timestamp: new Date().toISOString()
             });
 
             // Tratar erros específicos do FCM
@@ -83,6 +67,41 @@ class FCMService {
                     success: false,
                     error: 'INVALID_TOKEN',
                     message: 'Token FCM inválido ou não registrado'
+                };
+            }
+
+            // Tratar erro "Requested entity was not found"
+            if (error.message && error.message.includes('Requested entity was not found')) {
+                return {
+                    success: false,
+                    error: 'ENTITY_NOT_FOUND',
+                    message: 'Token FCM não encontrado ou expirado'
+                };
+            }
+
+            // Tratar outros erros comuns
+            if (error.code === 'messaging/quota-exceeded') {
+                return {
+                    success: false,
+                    error: 'QUOTA_EXCEEDED',
+                    message: 'Cota de mensagens FCM excedida'
+                };
+            }
+
+            if (error.code === 'messaging/server-unavailable') {
+                return {
+                    success: false,
+                    error: 'SERVER_UNAVAILABLE',
+                    message: 'Servidor FCM temporariamente indisponível'
+                };
+            }
+
+            // Tratar erro de token não registrado (código específico)
+            if (error.code === 'messaging/registration-token-not-registered') {
+                return {
+                    success: false,
+                    error: 'TOKEN_NOT_REGISTERED',
+                    message: 'Token FCM não está mais registrado'
                 };
             }
 

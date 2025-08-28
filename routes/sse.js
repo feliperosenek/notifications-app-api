@@ -96,17 +96,15 @@ router.get('/:route', (req, res) => {
  * Função para enviar notificação de nova mensagem para todos os clientes de uma rota
  */
 function sendMessageNotification(route, messageData) {
-    const routeClients = sseClients.get(route);
-    
+    const routeClients = sseClients.get(route);    
+
+    // Verificar se existem clientes conectados para esta rota
     if (!routeClients || routeClients.size === 0) {
-        logger.message('Nenhum cliente SSE conectado para rota', {
-            route,
-            messageId: messageData.id
-        });
         return {
             success: false,
             clientsCount: 0,
-            message: 'Nenhum cliente SSE conectado'
+            failedCount: 0,
+            message: 'Nenhum cliente SSE conectado para esta rota'
         };
     }
 
@@ -123,6 +121,12 @@ function sendMessageNotification(route, messageData) {
 
     routeClients.forEach((client, clientId) => {
         try {
+            // Verificar se o cliente ainda está ativo
+            if (client.destroyed || client.finished) {
+                failedClients.push(clientId);
+                return;
+            }
+
             client.write(`data: ${JSON.stringify(notification)}\n\n`);
             sentCount++;
         } catch (error) {
@@ -141,14 +145,6 @@ function sendMessageNotification(route, messageData) {
         routeClients.delete(clientId);
     });
 
-    logger.message('Notificação SSE enviada', {
-        route,
-        messageId: messageData.id,
-        sentCount,
-        failedCount: failedClients.length,
-        totalClients: routeClients.size
-    });
-
     return {
         success: sentCount > 0,
         clientsCount: sentCount,
@@ -156,6 +152,42 @@ function sendMessageNotification(route, messageData) {
         message: `Notificação enviada para ${sentCount} clientes`
     };
 }
+
+/**
+ * GET /sse/debug/:route
+ * Endpoint de debug para verificar conexões de uma rota específica
+ */
+router.get('/debug/:route', (req, res) => {
+    const { route } = req.params;
+    const routeClients = sseClients.get(route);
+    
+    if (!routeClients) {
+        return res.json({
+            success: false,
+            route,
+            message: 'Nenhuma conexão SSE para esta rota',
+            totalRoutes: sseClients.size,
+            availableRoutes: Array.from(sseClients.keys()),
+            timestamp: new Date().toISOString()
+        });
+    }
+
+    const clients = Array.from(routeClients.entries()).map(([clientId, client]) => ({
+        clientId,
+        isConnected: !client.destroyed,
+        connectionTime: client._connectionTime || 'N/A'
+    }));
+
+    res.json({
+        success: true,
+        route,
+        clientsCount: routeClients.size,
+        clients,
+        totalRoutes: sseClients.size,
+        availableRoutes: Array.from(sseClients.keys()),
+        timestamp: new Date().toISOString()
+    });
+});
 
 /**
  * GET /sse/status

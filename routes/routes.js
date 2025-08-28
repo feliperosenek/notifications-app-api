@@ -4,9 +4,7 @@ const { logger, loggerMiddleware } = require('../middleware/logger');
 router.use(loggerMiddleware);
 
 const injectDependencies = (sequelize) => {
-  // Log de teste usando o novo logger livre
-  logger.free('Teste do logger livre - Rotas carregadas', { timestamp: new Date().toISOString() });
-  
+
   router.post('/check-route', async (req, res) => {
     const { userId } = req.body;
 
